@@ -7,3 +7,4 @@ generated_cards/
 __pycache__/
 .env
 images/
+firebase.json

@@ -75,6 +75,7 @@ async def create_app_user_endpoint(
     db: Session = Depends(get_db)
 ):
     try:
+        print(admin_name, admin_password, user_name, user_password, user_email)
         if admin_name == os.getenv("ADMIN_NAME") and admin_password == os.getenv("ADMIN_PASSWORD"):
             firebase_controller = FirebaseController()
             isCreated = firebase_controller.create_app_user(

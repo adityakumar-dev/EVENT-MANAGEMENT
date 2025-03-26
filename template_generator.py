@@ -2,96 +2,104 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 import os
 import qrcode
-from io import BytesIO
-import base64
 
-class VisitorCardGenerator:
-    def __init__(self):
-        self.template_path = "template/template.jpeg"
-        self.font_path = "fonts/arial.ttf"
-        self.card_size = (720, 1280)  # Updated to specified size
-        
-    def create_visitor_card(self, user_data):
-        """
-        Generate a visitor card for a user
-        user_data should contain: name, email, profile_image_path, qr_code_path
-        """
-        try:
-            # Load template
-            template = Image.open(self.template_path)
-            template = template.resize(self.card_size)
-            
-            # Load user profile image
-            profile_img = Image.open(user_data["profile_image_path"])
-            profile_img = self._resize_image(profile_img, (150, 150))  # Adjusted profile image size
-            
-            # Load QR code
-            qr_img = Image.open(user_data["qr_code_path"])
-            qr_img = self._resize_image(qr_img, (450, 450))  # Increased QR code size
-            
-            # Create a copy of template to work on
-            card = template.copy()
-            profile_pos = (80, 380)  # Adjusted profile image position
-            qr_pos = (135, 700)  # Adjusted QR code position (taking space from the bottom)
-            name_pos = (283, 380)
-            email_pos = (283, 440)
-            id_pos = (283, 480)  # Adjusted position for ID
-            valid_pos = (153, 600)  # Position for "Valid Upto" below the image and text section
-            
-            # Paste images with transparency
-            if profile_img.mode == 'RGBA':
-                card.paste(profile_img, profile_pos, profile_img)
-            else:
-                card.paste(profile_img, profile_pos)
-                
-            if qr_img.mode == 'RGBA':
-                card.paste(qr_img, qr_pos, qr_img)
-            else:
-                card.paste(qr_img, qr_pos)
-            
-            # Add text
-            draw = ImageDraw.Draw(card)
-            font_name = ImageFont.truetype(self.font_path, 48)
-            font_email = ImageFont.truetype(self.font_path, 20)
-            font_id = ImageFont.truetype(self.font_path, 30)
-            
-            draw.text(name_pos, user_data["name"], fill="black", font=font_name, stroke_width=2, stroke_fill="black")
-            draw.text(email_pos, user_data["email"], fill="black", font=font_email)
-            draw.text(id_pos, user_data["user_id"], fill="black", font=font_id, stroke_width=1, stroke_fill="black")
-            draw.text(valid_pos, "Valid Upto: 07-03-2025 --- 09-03-2025", fill="black", font=font_id)
-            
-            # Save the card
-            os.makedirs("generated_cards", exist_ok=True)
-            output_path = f"generated_cards/{user_data['name'].replace(' ', '_')}_visitor_card_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png"
-            card.save(output_path, "PNG", quality=95)
-            
-            return output_path
-        
-        except Exception as e:
-            print(f"Error generating visitor card: {str(e)}")
-            raise
+def resize_image(image, box_size):
+    """Resize and crop image to exactly fit the given box size, maintaining aspect ratio."""
+    img_width, img_height = image.size
+    box_width, box_height = box_size
+    img_ratio = img_width / img_height
+    box_ratio = box_width / box_height
     
-    def _resize_image(self, image, box_size):
-        """Resize and crop image to exactly fit the given box size, maintaining aspect ratio."""
-        img_width, img_height = image.size
-        box_width, box_height = box_size
-        img_ratio = img_width / img_height
-        box_ratio = box_width / box_height
+    if img_ratio > box_ratio:
+        new_height = box_height
+        new_width = int(new_height * img_ratio)
+    else:
+        new_width = box_width
+        new_height = int(new_width / img_ratio)
+    
+    image = image.resize((new_width, new_height), Image.LANCZOS)
+    left = (new_width - box_width) // 2
+    top = (new_height - box_height) // 2
+    right = left + box_width
+    bottom = top + box_height
+    
+    return image.crop((left, top, right, bottom))
+
+def create_visitor_card(user_data):
+    """
+    Generate a visitor card for a user
+    user_data should contain: name, user_contact, profile_image_path, qr_code_path, user_id, institution_name
+    """
+    try:
+        card_size = (1414, 2000)  # Portrait-oriented card
+        template = Image.open("template/template2.png").resize(card_size)
         
-        if img_ratio > box_ratio:
-            new_height = box_height
-            new_width = int(new_height * img_ratio)
-        else:
-            new_width = box_width
-            new_height = int(new_width / img_ratio)
+        # Load user profile image
+        try:
+            profile_img = Image.open(user_data["profile_image_path"])
+        except:
+            # Fallback to placeholder if profile image loading fails
+            profile_img = Image.new('RGB', (300, 300), 'gray')
+        profile_img = resize_image(profile_img, (300, 300))
         
-        image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        left = (new_width - box_width) // 2
-        top = (new_height - box_height) // 2
-        right = left + box_width
-        bottom = top + box_height
+        # Load and process QR code
+        try:
+            qr_img = Image.open(user_data["qr_code_path"]).convert("RGBA")
+            
+            # Create a mask for the QR code
+            data = qr_img.getdata()
+            new_data = []
+            for item in data:
+                # If pixel is white or near-white, make it transparent
+                if item[0] > 240 and item[1] > 240 and item[2] > 240:
+                    new_data.append((255, 255, 255, 0))  # Transparent
+                else:
+                    new_data.append((0, 0, 0, 255))  # Solid black
+            
+            qr_img.putdata(new_data)
+            qr_img = resize_image(qr_img, (650, 650))
+            
+        except Exception as e:
+            print(f"Error processing QR code: {str(e)}")
+            raise
         
-        return image.crop((left, top, right, bottom))
+        # Create a copy of template and convert to RGBA
+        card = template.copy().convert("RGBA")
+        
+        # Layout positions
+        profile_pos = (320, 930)  # Left side
+        text_x = 650  # Right side for text fields
+        qr_pos = ((card_size[0] - 650) // 2, 1350)  # Centered horizontally
+        
+        name_pos = (text_x, 970)
+        contact_pos = (text_x, 1040)
+        id_pos = (text_x, 1110)
+        institution_pos = (text_x, 1180)
+        
+        # Paste images
+        card.paste(profile_img, profile_pos)
+        card.paste(qr_img, qr_pos, qr_img)  # Use QR image as its own mask
+        
+        # Add text
+        draw = ImageDraw.Draw(card)
+        font_large = ImageFont.truetype("fonts/arial.ttf", 55)
+        font_medium = ImageFont.truetype("fonts/arial.ttf", 40)
+        
+        draw.text(name_pos, f"Name: {user_data['name']}", fill="black", font=font_large, anchor="lm")
+        draw.text(contact_pos, f"Contact: {user_data['user_contact']}", fill="black", font=font_medium, anchor="lm")
+        draw.text(id_pos, f"ID: {user_data['user_id']}", fill="black", font=font_medium, anchor="lm")
+        draw.text(institution_pos, f"Institution: {user_data['institution_name']}", fill="black", font=font_medium, anchor="lm")
+        
+        # Save the card
+        os.makedirs("generated_cards", exist_ok=True)
+        output_path = f"generated_cards/{user_data['name'].replace(' ', '_')}_visitor_card_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.png"
+        card.save(output_path, "PNG", quality=95)
+        
+        return output_path
+        
+    except Exception as e:
+        print(f"Error generating visitor card: {str(e)}")
+        raise
 
 def generate_qr_code(data, output_path):
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
@@ -100,14 +108,18 @@ def generate_qr_code(data, output_path):
     qr_img = qr.make_image(fill='black', back_color='white')
     qr_img.save(output_path)
 
+# Test function
 def main():
     os.makedirs("template", exist_ok=True)
     os.makedirs("fonts", exist_ok=True)
     os.makedirs("generated_cards", exist_ok=True)
     
-    user = {"name": "John Doe", "email": "johndoe@example.com", "user_id": "12345", "valid_upto": "31-12-2025"}
-    
-    generator = VisitorCardGenerator()
+    user = {
+        "name": "John Doe",
+        "user_contact": "1234567890",
+        "user_id": "12345",
+        "institution_name": "XYZ University"
+    }
     
     profile_img_path = "template/john_doe_profile.jpg"
     qr_code_path = "template/john_doe_qrcode.png"
@@ -116,14 +128,14 @@ def main():
     
     user_data = {
         "name": user["name"],
-        "email": user["email"],
+        "user_contact": user["user_contact"],
         "profile_image_path": profile_img_path,
         "qr_code_path": qr_code_path,
         "user_id": user["user_id"],
-        "valid_upto": user["valid_upto"]
+        "institution_name": user["institution_name"]
     }
     
-    output = generator.create_visitor_card(user_data)
+    output = create_visitor_card(user_data)
     print(f"Visitor card generated for {user['name']}: {output}")
 
 if __name__ == "__main__":

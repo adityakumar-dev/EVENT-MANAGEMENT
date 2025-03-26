@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 # Load environment variables from .env file
 load_dotenv()
 
-from routes import analytics, app_users_handler, institutions, push_update, qr, users
+from routes import analytics, app_users_handler, push_update, qr, users
 from routes import face_capture
 app = FastAPI()
 
@@ -54,7 +54,7 @@ app.mount("/images", StaticFiles(directory="images"), name="images")
 
 
 app.include_router(users.router, prefix="/users", tags=["users"])
-app.include_router(institutions.router, prefix="/institutions", tags=["institutions"])
+# app.include_router(institutions.router, prefix="/institutions", tags=["institutions"])
 app.include_router(qr.router, prefix="/qr", tags=["qr"])
 app.include_router(app_users_handler.router, prefix="/app_users", tags=["app_users"])
 app.include_router(analytics.router, )

@@ -20,7 +20,8 @@ async def capture_face(
 ):
     try:
         # Validate the uploaded file type
-        if not file.content_type.startswith('image/'):
+        #check image using extension
+        if not file.filename.endswith(('.jpg', '.jpeg', '.png','.PNG','.JPG','.JPEG','.WEBP','.webp')):
             raise HTTPException(status_code=400, detail="Uploaded file is not an image")
 
         # Get the user from the database

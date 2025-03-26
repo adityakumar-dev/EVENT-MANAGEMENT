@@ -31,153 +31,91 @@ async def save_image(image: UploadFile) -> str:
 @router.post("/scan_qr")
 def scan_qr(
     user_id: int = Form(...),
-    is_bypass: bool = Form(False),
-    bypass_reason: str = Form(None),
     current_app_user: models.AppUsers = Depends(get_current_app_user),
     db: Session = Depends(get_db)
 ):
     try:
-        # Use current_app_user instead of looking up app_user
-        app_user_id = current_app_user.user_id
-
-        # print
         # Validate user
         user = db.query(models.User).filter(models.User.user_id == user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
+        current_time = datetime.now(pytz.timezone('Asia/Kolkata'))
+        current_date = current_time.date()
 
+        # Create new time log entry
+        new_entry = {
+            "arrival": current_time.isoformat(),
+            "qr_verified": True,
+            "qr_verification_time": current_time.isoformat()
+        }
 
-        def create_time_log_entry(entry_type="normal"):
-            current_time = datetime.now(pytz.timezone('Asia/Kolkata')).isoformat()  # Use local timezone
-            entry = {
-                "arrival": current_time,
-                "departure": None,
-                "duration": None,
-                "entry_type": entry_type,
-                "qr_verified": True,
-                "qr_verification_time": current_time
-            }
-
-            if entry_type == "bypass":
-                entry["bypass_details"] = {
-                    "reason": bypass_reason or "No reason provided",
-                    "approved_by": app_user_id,
-                    "approved_at": current_time
-                }
-
-            return entry
-
-        # Handle existing entry
-        existing_entry = db.query(models.FinalRecords).filter(
+        # Check for existing entry for current date
+        existing_record = db.query(models.FinalRecords).filter(
             models.FinalRecords.user_id == user_id,
-            models.FinalRecords.entry_date == datetime.now(pytz.timezone('Asia/Kolkata')).date()
+            models.FinalRecords.entry_date == current_date
         ).first()
 
-        if existing_entry:
+        if existing_record:
             # Initialize time_logs if None
-            if existing_entry.time_logs is None:
-                existing_entry.time_logs = []
-
-            # Check if last entry has departure time
-            should_add_new_entry = True
-            if existing_entry.time_logs:
-                last_entry = existing_entry.time_logs[-1]
-                if last_entry.get('departure') is None:
-                    should_add_new_entry = False
-
-                    # Check if face verification is already done
-                    if last_entry.get('arrival') is None:
-                        # Create a new dictionary instead of updating the existing one
-                        updated_entry = {
-                            'arrival': datetime.now(pytz.timezone('Asia/Kolkata')).isoformat(),
-                            'departure': None,
-                            'qr_verified': True,
-                            'qr_verification_time': datetime.now(pytz.timezone('Asia/Kolkata')).isoformat(),
-                            'face_verified': last_entry.get('face_verified', False),
-                            'face_verification_time': last_entry.get('face_verification_time'),
-                            'entry_type': "bypass" if is_bypass else "normal",
-                        }
-
-                        # Add bypass details only if it's a bypass entry
-                        if is_bypass:
-                            updated_entry['bypass_details'] = {
-                                "reason": bypass_reason or "No reason provided",
-                                "approved_by": app_user_id,
-                                "approved_at": datetime.now(pytz.timezone('Asia/Kolkata')).isoformat()
-                            }
-                        else:
-                            # Remove bypass details if it's not a bypass entry
-                            updated_entry['bypass_details'] = None
-
-                        # Update the database directly
-                        new_time_logs = existing_entry.time_logs[:-1] + [updated_entry]
-                        db.query(models.FinalRecords).filter(
-                            models.FinalRecords.user_id == user_id,
-                            models.FinalRecords.entry_date == datetime.now(pytz.timezone('Asia/Kolkata')).date()
-                        ).update({
-                            "time_logs": new_time_logs
-                        }, synchronize_session=False)
-
-                        try:
-                            db.commit()
-                            # Refresh to get updated data
-                            db.refresh(existing_entry)
-                        except Exception as e:
-                            db.rollback()
-                            raise HTTPException(
-                                status_code=500, 
-                                detail=f"Failed to update entry: {str(e)}"
-                            )
-
-                        return {
-                            "status": "success",
-                            "message": "QR verification successful. Arrival time updated.",
-                            "entry_type": "bypass" if is_bypass else "normal",
-                            "arrival_time": datetime.now(pytz.timezone('Asia/Kolkata')).isoformat(),
-                            "bypass_reason": bypass_reason if is_bypass else None,
-                            "updated_entry": updated_entry
-                        }
-                    else:
-                        raise HTTPException(
-                            status_code=400, 
-                            detail="QR verification is already completed. Please use departure section."
-                        )
-
-
-            if should_add_new_entry:
-                new_log = create_time_log_entry("bypass" if is_bypass else "normal")
-                # Create a new list with existing logs plus new log
-                updated_logs = existing_entry.time_logs + [new_log]
-                # Update the entire time_logs field
-                existing_entry.time_logs = updated_logs
-                db.flush()  # Ensure the update is processed
+            current_logs = existing_record.time_logs or []
+            
+            # Create new time_logs array with the new entry
+            updated_logs = current_logs + [new_entry]
+            
+            try:
+                # Explicitly update the time_logs column
+                db.query(models.FinalRecords).filter(
+                    models.FinalRecords.user_id == user_id,
+                    models.FinalRecords.entry_date == current_date
+                ).update(
+                    {"time_logs": updated_logs},
+                    synchronize_session=False
+                )
+                
+                db.commit()
+                print(f"Added new time log to existing record for user {user_id} on {current_date}")
+            except Exception as e:
+                db.rollback()
+                print(f"Error updating existing record: {str(e)}")
+                raise HTTPException(status_code=500, detail="Failed to update time logs")
         else:
-            # Create new record
+            # Create new record for the day
             new_record = models.FinalRecords(
                 user_id=user_id,
-                entry_date=datetime.now(pytz.timezone('Asia/Kolkata')).date(),
-                time_logs=[create_time_log_entry("bypass" if is_bypass else "normal")],
-                app_user_id=app_user_id
+                entry_date=current_date,
+                app_user_id=current_app_user.user_id,
+                time_logs=[new_entry]
             )
-            db.add(new_record)
-
-            # Handle group entry
             
-        db.commit()
-        # firebase_controller.log_qr_scan(user_id, user.name, True, "Successful QR scan")
+            try:
+                db.add(new_record)
+                db.commit()
+                print(f"Created new record for user {user_id} on {current_date}")
+            except Exception as e:
+                db.rollback()
+                print(f"Error creating new record: {str(e)}")
+                raise HTTPException(status_code=500, detail="Failed to create new record")
+
+        # Check if face image exists
+        is_image_exist = False
+        try:
+            is_image_exist = bool(user.face_image_path)
+        except Exception as e:
+            print(f"Error checking face image: {str(e)}")
 
         return {
+            "status": "success",
             "message": "Check-in successful",
             "user_id": user_id,
-            "arrival_time": datetime.now(pytz.timezone('Asia/Kolkata')).isoformat(),
-            "bypass_reason": bypass_reason if is_bypass else None,
-            "is_image_captured": True if existing_entry.face_image_path else False
+            "arrival_time": current_time.isoformat(),
+            "is_image_captured": is_image_exist,
+            "entry_type": "new_record" if not existing_record else "updated_record"
         }
 
     except Exception as e:
         db.rollback()
-        # firebase_controller.log_server_activity("ERROR", f"Error processing QR scan for user_id: {user_id} - {str(e)}")
+        print(f"Error in scan_qr: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     
 @router.post("/departure")

@@ -13,7 +13,7 @@ import traceback
 from fastapi.responses import JSONResponse, FileResponse
 from firebase_controller import firebase_controller
 from uuid import uuid4
-from template_generator import VisitorCardGenerator
+from template_generator import create_visitor_card
 from utils.security import SecurityHandler
 from fastapi import BackgroundTasks
 from pathlib import Path
@@ -35,53 +35,43 @@ def create_user(
     name: str = Form(...),
     email: str = Form(...),
     image: UploadFile = File(...),
-    institution_id: int = Form(...),
-    login_id: str = Form(...),
-    password: str = Form(...),
-
+    institution_name: str = Form(...),
+    contact_number: str = Form(...),
     db: Session = Depends(get_db)
 ):
     try:
-        institution = db.query(models.Institution).filter(models.Institution.institution_id == institution_id).first()
-        if not institution:
-            raise HTTPException(status_code=400, detail="Invalid institution ID")
-        check_password = db.query(models.InstitutionLogin).filter(models.InstitutionLogin.login_id == login_id).first()
-        if check_password is None:
-            raise HTTPException(status_code=400, detail="Invalid login id")
-        if check_password.password != password:
-            raise HTTPException(status_code=400, detail="Invalid password")
-        # Structured logging of input parameters
         request_data = {
             "name": name,
             "email": email,
-            "institution_id": institution_id,
-            "institution_name": institution.name,
+            "institution_name": institution_name,
+            "contact_number": contact_number,
             "image_filename": image.filename    
         }
         print(f"Creating new user with data: {request_data}")
+        
+        # Validate image format
         if image.filename.split(".")[-1] not in ["jpg", "jpeg", "png", "webp"]:
             raise HTTPException(status_code=400, detail="Image must be a jpg, jpeg, png, or webp file")
-        # Validation checks...
+        
+        # Check for existing user
         existing_user = db.query(models.User).filter(
-            (models.User.email == email) 
+            models.User.email == email
         ).first()
         
         if existing_user:
             raise HTTPException(status_code=400, detail="User already exists with this email")
-        
-
 
         # Save image
         image_path = save_upload_file(image)
         print(f"Saved image at: {image_path}")
 
-        # Create user
+        # Create user with direct institution name
         new_user = models.User(
             name=name,
             email=email,
             image_path=image_path,
-            institution_id=institution_id,
-            institution_name=institution.name,
+            institution_name=institution_name,
+            contact_number=contact_number
         )
         
         db.add(new_user)
@@ -97,28 +87,26 @@ def create_user(
         db.commit()
         db.refresh(new_user)
         
-        
-        
-        # After successful user creation, generate visitor card
-        visitor_card_generator = VisitorCardGenerator()
-        card_path = visitor_card_generator.create_visitor_card({
+        # Generate visitor card
+        card_path = create_visitor_card({
             "name": new_user.name,
-            "email": new_user.email,
             "profile_image_path": str(Path(new_user.image_path)),
             "qr_code_path": new_user.qr_code,
-            "user_id": str(new_user.user_id)
+            "user_contact": new_user.contact_number,
+            "user_id": str(new_user.user_id),
+            "institution_name": new_user.institution_name
         })
 
         print(f"Successfully created user: {new_user.user_id}")
 
-        # After successful user creation and visitor card generation
-        send_welcome_email_background(
-            background_tasks=background_tasks,
-            user_email=new_user.email,
-            user_name=new_user.name,
-            qr_code_path=new_user.qr_code,
-            visitor_card_path=card_path
-        )
+        # Send welcome email in background
+        # send_welcome_email_background(
+        #     background_tasks=background_tasks,
+        #     user_email=new_user.email,
+        #     user_name=new_user.name,
+        #     qr_code_path=new_user.qr_code,
+        #     visitor_card_path=card_path
+        # )
 
         return {
             "user_id": new_user.user_id,
@@ -126,12 +114,9 @@ def create_user(
             "email": new_user.email,
             "qr_code": new_user.qr_code,
             "image_path": new_user.image_path,
+            "institution_name": new_user.institution_name,
             "visitor_card_path": card_path,
-            "visitor_card": {
-                "path": card_path,
-                "url": f"/static/visitor_cards/{card_path.split('/')[-1]}" if card_path else None,
-                "generated_at": str(datetime.now())
-            },
+            "card_path": card_path,
             "email_status": "sending_in_background"
         }
 
@@ -182,7 +167,6 @@ def get_user(
                             "arrival": arrival_time.isoformat() if arrival_time else None,
                             "departure": departure_time.isoformat() if departure_time else None,
                             "duration": log.get("duration"),
-                            "entry_type": log.get("entry_type", "normal"),
                             "face_image_path": log.get("face_image_path")
                         }
 
@@ -197,15 +181,13 @@ def get_user(
                 processed_records.append(entry_data)
 
             # Get the count of users associated with the instructor's institution
-            institute_data = db.query(models.Institution).filter(models.Institution.institution_id == user.institution_id).first()
-            count = institute_data.count if institute_data else 0
-            name = institute_data.name if institute_data else "Unknown"
+           
             response_data = {
                 "user": {
                     "user_id": user.user_id,
                     "name": user.name,
                     "email": user.email,
-                    "institution": user.institution.name if user.institution else None,
+                    "institution_name": user.institution_name,
                     "image_path": f"{user.image_path}",
                     "qr_code_path": f"{user.qr_code}",
                     "created_at": user.created_at.isoformat() if user.created_at else None,
@@ -214,14 +196,8 @@ def get_user(
                 "summary": {
                     "total_days": len(processed_records),
                     "total_entries": sum(len(record["entries"]) for record in processed_records),
-                    "normal_entries": sum(
-                        len([e for e in record["entries"] if e["entry_type"] == "normal"])
-                        for record in processed_records
-                    ),
-                    "bypass_entries": sum(
-                        len([e for e in record["entries"] if e["entry_type"] == "bypass"])
-                        for record in processed_records
-                    ),
+                  
+                   
                 },
                 "image_base64": None,
                 "qr_base64": None
@@ -255,41 +231,32 @@ def get_user(
 @router.post("/all")
 def get_all_users(
     user_type: str = Query(None),
-    institution_id: int = Query(None),
+    institution_name: str = Query(None),  # Optional filter by institution name
     db: Session = Depends(get_db)
 ):
     try:
-        current_date = datetime.now().date()
-        current_time = datetime.now()
+        current_date = datetime.now(pytz.timezone('Asia/Kolkata')).date()
+        current_time = datetime.now(pytz.timezone('Asia/Kolkata'))
         
         response = {
             "all_users": [],
-            "instructors": [],
-            "quick_register_users": [],
             "individual": [],
             "statistics": {
                 "total_users": 0,
-                "total_quick_register": 0,
                 "total_individual": 0,
             },
             "today_statistics": {
                 "active_entries": 0,
                 "total_entries": 0,
-                # "active_instructors": 0,
                 "active_individual": 0,
-                "active_quick_register": 0
             },
         }
         
+        # Build query with optional institution filter
         query = db.query(models.User)
-        if institution_id:
-            query = query.filter(models.User.institution_id == institution_id)
-        if user_type == "instructor":
-            query = query.filter(models.User.is_instructor.is_(True))
-            institution_id = query.first().institution_id
-            count = db.query(models.Institution).filter(models.Institution.institution_id == institution_id).first().count
-            response["statistics"]["group_count"] = count
-
+        if institution_name:
+            query = query.filter(models.User.institution_name == institution_name)
+        
         users = query.all()
 
         for user in users:
@@ -299,84 +266,55 @@ def get_all_users(
                 models.FinalRecords.entry_date == current_date
             ).all()
             
-
             # Initialize current entry details
             current_entry = {
                 "is_active": False,
-                "entry_type": None,
                 "arrival_time": None,
                 "duration_minutes": 0,
                 "entry_id": None,
                 "qr_verified": False,
-
             }
             
-            # Check if user is currently active
-            is_active = False
+            # Process user records
             for record in final_records:
                 if record.time_logs:
                     for log in record.time_logs:
-                        # Count entry types for today
-                        entry_type = log.get('entry_type', 'normal')
-                        if entry_type == 'normal':
-                            response["entry_types"]["normal_entries"] += 1
-                        elif entry_type == 'group_entry':
-                            response["entry_types"]["group_entries"] += 1
-                        elif entry_type == 'bypass':
-                            response["entry_types"]["bypass_entries"] += 1
-                        
-                        # Check if entry is active (has arrival but no departure)
                         if log.get('arrival') and not log.get('departure'):
-                            is_active = True
-                            arrival_time = datetime.fromisoformat(log['arrival'])
+                            arrival_time = datetime.fromisoformat(log['arrival']).replace(tzinfo=pytz.timezone('Asia/Kolkata'))
                             duration = (current_time - arrival_time).total_seconds() / 60
                             
-                            # Update current entry details
-                            current_entry = {
+                            current_entry.update({
                                 "is_active": True,
-                                "entry_type": entry_type,
                                 "arrival_time": log['arrival'],
                                 "duration_minutes": round(duration, 2),
                                 "entry_id": record.record_id,
                                 "qr_verified": log.get('qr_verified', False),
-                            }
+                            })
                             
                             response["today_statistics"]["active_entries"] += 1
-                            
-                            # Count active entries by user type
-                            if user.is_quick_register:
-                                response["today_statistics"]["active_quick_register"] += 1
-                            else:
-                                response["today_statistics"]["active_individual"] += 1
+                            response["today_statistics"]["active_individual"] += 1
 
-            # Create user data dictionary with current entry details
             user_data = {
                 "id": user.user_id,
                 "name": user.name,
                 "email": user.email,
                 "image_path": user.image_path,
+                "institution_name": user.institution_name,
                 "created_at": user.created_at.isoformat() if user.created_at else None,
-                "current_entry": current_entry  # Add current entry details
+                "current_entry": current_entry
             }
 
-            # Add to appropriate lists and update statistics
             response["all_users"].append(user_data)
-            
-            if user.is_quick_register:
-                response["quick_register_users"].append(user_data)
-                response["statistics"]["total_quick_register"] += 1
-            else:
-                response["individual"].append(user_data)
-                response["statistics"]["total_individual"] += 1
-
+            response["individual"].append(user_data)
+            response["statistics"]["total_individual"] += 1
             response["today_statistics"]["total_entries"] += sum(
                 len(record.time_logs) for record in final_records
             )
 
         response["statistics"]["total_users"] = len(users)
 
-        # Sort all lists by current_entry.is_active (active first) and then by created_at
-        for key in ["all_users",  "quick_register_users", "individual"]:
+        # Sort users by active status and creation date
+        for key in ["all_users", "individual"]:
             response[key] = sorted(
                 response[key],
                 key=lambda x: (not x["current_entry"]["is_active"], x["created_at"] if x["created_at"] else "0"),

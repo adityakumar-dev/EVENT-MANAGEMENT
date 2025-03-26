@@ -6,35 +6,6 @@ from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 import pytz  # Import pytz for timezone handling
 
-class LoginUrlKey(Base):
-    __tablename__ = "login_url_key"
-    serial_number = Column(Integer, primary_key=True, index=True)
-    key = Column(String, nullable=False)
-    is_used = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(pytz.timezone('Asia/Kolkata')))
-    
-    
-class Institution(Base):
-    __tablename__ = "institutions"
-    
-    institution_id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False,unique=False)
-    address = Column(String, nullable=False)
-    contact_number = Column(String, nullable=False)
-    email = Column(String, nullable=False)
-    count = Column(String, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(pytz.timezone('Asia/Kolkata')))
-    # One-to-many relationship with users
-    users = relationship("User", back_populates="institution")
-
-class InstitutionLogin(Base):
-    __tablename__ = "institution_login"
-
-    institution_id = Column(Integer,  primary_key=True, index=True, nullable=False)
-    login_id = Column(String, nullable=False)
-    password = Column(String, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(pytz.timezone('Asia/Kolkata')))
-
 class User(Base):
     __tablename__ = "users"
     
@@ -42,10 +13,9 @@ class User(Base):
     name = Column(String)
     email = Column(String, unique=True, index=True)
     image_path = Column(String)
+    contact_number = Column(String, nullable=True)
     qr_code = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(pytz.timezone('Asia/Kolkata')))
-    institution_id = Column(Integer, ForeignKey("institutions.institution_id"), nullable=True)
-    institution = relationship("Institution", back_populates="users")
     institution_name = Column(String, nullable=True)
 
 
