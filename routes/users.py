@@ -20,6 +20,7 @@ from pathlib import Path
 import mimetypes  # Add this import
 from utils.email_handler import send_welcome_email_background
 import pytz  # Import the pytz library
+from sqlalchemy import func
 
 router = APIRouter()
 
@@ -230,69 +231,57 @@ def get_user(
 
 @router.post("/all")
 def get_all_users(
-    user_type: str = Query(None),
-    institution_name: str = Query(None),  # Optional filter by institution name
     db: Session = Depends(get_db)
 ):
     try:
-        current_date = datetime.now(pytz.timezone('Asia/Kolkata')).date()
         current_time = datetime.now(pytz.timezone('Asia/Kolkata'))
+        current_date = current_time.date()
         
         response = {
             "all_users": [],
-            "individual": [],
             "statistics": {
                 "total_users": 0,
-                "total_individual": 0,
+                "total_entries": 0,  # Total entries across all time
             },
             "today_statistics": {
-                "active_entries": 0,
-                "total_entries": 0,
-                "active_individual": 0,
-            },
-        }
-        
-        # Build query with optional institution filter
-        query = db.query(models.User)
-        if institution_name:
-            query = query.filter(models.User.institution_name == institution_name)
-        
-        users = query.all()
-
-        for user in users:
-            # Get today's records for the user
-            final_records = db.query(models.FinalRecords).filter(
-                models.FinalRecords.user_id == user.user_id,
-                models.FinalRecords.entry_date == current_date
-            ).all()
-            
-            # Initialize current entry details
-            current_entry = {
-                "is_active": False,
-                "arrival_time": None,
-                "duration_minutes": 0,
-                "entry_id": None,
-                "qr_verified": False,
+                "total_entries": 0,  # Total entries today
+                "active_entries": 0,  # Users with face image pending
             }
-            
-            # Process user records
-            for record in final_records:
-                if record.time_logs:
-                    for log in record.time_logs:
-                        if log.get('arrival') and not log.get('departure'):
-                            arrival_time = datetime.fromisoformat(log['arrival']).replace(tzinfo=pytz.timezone('Asia/Kolkata'))
-                            duration = (current_time - arrival_time).total_seconds() / 60
-                            
-                            current_entry.update({
-                                "is_active": True,
-                                "arrival_time": log['arrival'],
-                                "duration_minutes": round(duration, 2),
-                                "entry_id": record.record_id,
-                                "qr_verified": log.get('qr_verified', False),
-                            })
-                            
-                            response["today_statistics"]["active_entries"] += 1
-                            response["today_statistics"]["active_individual"] += 1
+        }
+
+        # Get all users
+        users = db.query(models.User).all()
+        response["statistics"]["total_users"] = len(users)
+
+        # Get total entries (all time)
+        total_entries = db.query(models.FinalRecords).count()
+        response["statistics"]["total_entries"] = total_entries
+
+        # Get today's entries
+        today_entries = db.query(models.FinalRecords).filter(
+            func.date(models.FinalRecords.entry_date) == current_date
+        ).count()
+        response["today_statistics"]["total_entries"] = today_entries
+
+        # Get active entries (entries without face image)
+        active_entries = db.query(models.FinalRecords).filter(
+            func.date(models.FinalRecords.entry_date) == current_date,
+            models.FinalRecords.face_image_path == None
+        ).count()
+        response["today_statistics"]["active_entries"] = active_entries
+
+        # Process user data
+        for user in users:
+            # Check if user has entry today
+            today_entry = db.query(models.FinalRecords).filter(
+                models.FinalRecords.user_id == user.user_id,
+                func.date(models.FinalRecords.entry_date) == current_date
+            ).first()
+
+            # Get latest entry for the user
+            latest_entry = db.query(models.FinalRecords).filter(
+                models.FinalRecords.user_id == user.user_id
+            ).order_by(models.FinalRecords.entry_date.desc()).first()
 
             user_data = {
                 "id": user.user_id,
@@ -301,25 +290,25 @@ def get_all_users(
                 "image_path": user.image_path,
                 "institution_name": user.institution_name,
                 "created_at": user.created_at.isoformat() if user.created_at else None,
-                "current_entry": current_entry
+                "entry_status": {
+                    "has_entry_today": bool(today_entry),
+                    "face_captured": bool(today_entry and today_entry.face_image_path if today_entry else False),
+                    "latest_entry": {
+                        "entry_date": latest_entry.entry_date.isoformat() if latest_entry else None,
+                        "face_image_path": latest_entry.face_image_path if latest_entry else None,
+                        "record_id": latest_entry.record_id if latest_entry else None
+                    } if latest_entry else None
+                }
             }
-
             response["all_users"].append(user_data)
-            response["individual"].append(user_data)
-            response["statistics"]["total_individual"] += 1
-            response["today_statistics"]["total_entries"] += sum(
-                len(record.time_logs) for record in final_records
-            )
 
-        response["statistics"]["total_users"] = len(users)
-
-        # Sort users by active status and creation date
-        for key in ["all_users", "individual"]:
-            response[key] = sorted(
-                response[key],
-                key=lambda x: (not x["current_entry"]["is_active"], x["created_at"] if x["created_at"] else "0"),
-                reverse=False
-            )
+        # Sort users: those with today's entry but no face image first, 
+        # then those with complete entries today, then the rest
+        response["all_users"].sort(key=lambda x: (
+            not x["entry_status"]["has_entry_today"],  # Today's entries first
+            x["entry_status"]["face_captured"],  # Pending face capture first
+            x["created_at"] if x["created_at"] else "0"  # Then by creation date
+        ))
 
         return {
             "status": "success",

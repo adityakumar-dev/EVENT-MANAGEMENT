@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 # Load environment variables from .env file
 load_dotenv()
 
-from routes import analytics, app_users_handler, push_update, qr, users
+from routes import analytics, app_users_handler, food_router, push_update, qr, users
 from routes import face_capture
 app = FastAPI()
 
@@ -60,7 +60,7 @@ app.include_router(app_users_handler.router, prefix="/app_users", tags=["app_use
 app.include_router(analytics.router, )
 app.include_router(push_update.router, )
 app.include_router(face_capture.router, prefix="/face_capture", tags=["face_capture"])
-
+app.include_router(food_router.router)
 @app.get("/")
 async def check():
     return {True}

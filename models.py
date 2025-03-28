@@ -69,9 +69,7 @@ class FoodRecords(Base):
     record_id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.user_id"), unique=False)
     entry_date = Column(Date, default=datetime.utcnow().date())
-    is_morning = Column(Boolean, default=False)
-    is_afternoon = Column(Boolean, default=False)
-    is_night = Column(Boolean, default=False)
+    time_logs = Column(JSONB, default=list)
     created_at = Column(DateTime, default=lambda: datetime.now(pytz.timezone('Asia/Kolkata')))
     
     

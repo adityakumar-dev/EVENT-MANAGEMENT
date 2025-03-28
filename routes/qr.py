@@ -42,6 +42,10 @@ def scan_qr(
 
         current_time = datetime.now(pytz.timezone('Asia/Kolkata'))
         current_date = current_time.date()
+        is_any_entry_exist = db.query(models.FinalRecords).filter(
+            models.FinalRecords.user_id == user_id,
+            # models.FinalRecords.entry_date == current_date
+        ).first()
 
         # Create new time log entry
         new_entry = {
@@ -100,7 +104,7 @@ def scan_qr(
         # Check if face image exists
         is_image_exist = False
         try:
-            is_image_exist = bool(user.face_image_path)
+            is_image_exist = existing_record.face_image_path is not None
         except Exception as e:
             print(f"Error checking face image: {str(e)}")
 
@@ -110,7 +114,8 @@ def scan_qr(
             "user_id": user_id,
             "arrival_time": current_time.isoformat(),
             "is_image_captured": is_image_exist,
-            "entry_type": "new_record" if not existing_record else "updated_record"
+            "entry_type": "new_record" if not existing_record else "updated_record",
+            "is_any_entry_exist": True if is_any_entry_exist else False
         }
 
     except Exception as e:
