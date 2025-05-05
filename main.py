@@ -48,11 +48,11 @@ def get_db():
         db.close()
 # Mount the static directory
 app.mount("/static", StaticFiles(directory="uploads"), name="static")
-app.mount("/static/app_users", StaticFiles(directory="app_users"), name="app_users")
+# app.mount("/static/app_users", StaticFiles(directory="app_users"), name="app_users")
 # app.mount("/static/images", StaticFiles(directory="institutions"), name="institutions")
 app.mount("/images", StaticFiles(directory="images"), name="images")
 
-
+app.mount("/uploads", StaticFiles(directory="uploads"))
 app.include_router(users.router, prefix="/users", tags=["users"])
 # app.include_router(institutions.router, prefix="/institutions", tags=["institutions"])
 app.include_router(qr.router, prefix="/qr", tags=["qr"])

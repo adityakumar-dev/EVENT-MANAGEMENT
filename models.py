@@ -13,11 +13,12 @@ class User(Base):
     name = Column(String)
     email = Column(String, unique=True, index=True)
     image_path = Column(String)
-    contact_number = Column(String, nullable=True)
+    id_type = Column(String)
+    id = Column(String, nullable=True)
     qr_code = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(pytz.timezone('Asia/Kolkata')))
-    institution_name = Column(String, nullable=True)
-
+    group_name = Column(String, nullable=True)
+    count = Column(String, nullable=True)
 
 
 class AppUsers(Base):

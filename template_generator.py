@@ -28,7 +28,7 @@ def resize_image(image, box_size):
 def create_visitor_card(user_data):
     """
     Generate a visitor card for a user
-    user_data should contain: name, user_contact, profile_image_path, qr_code_path, user_id, institution_name
+    user_data should contain: name, profile_image_path, qr_code_path, user_id, institution_name
     """
     try:
         card_size = (1414, 2000)  # Portrait-oriented card
@@ -67,14 +67,13 @@ def create_visitor_card(user_data):
         card = template.copy().convert("RGBA")
         
         # Layout positions
-        profile_pos = (320, 930)  # Left side
+        profile_pos = (320, 910)  # Left side
         text_x = 650  # Right side for text fields
         qr_pos = ((card_size[0] - 650) // 2, 1350)  # Centered horizontally
         
         name_pos = (text_x, 970)
-        contact_pos = (text_x, 1040)
-        id_pos = (text_x, 1110)
-        institution_pos = (text_x, 1180)
+        id_pos = (text_x, 1040)
+        institution_pos = (text_x, 1110)
         
         # Paste images
         card.paste(profile_img, profile_pos)
@@ -86,9 +85,8 @@ def create_visitor_card(user_data):
         font_medium = ImageFont.truetype("fonts/arial.ttf", 40)
         
         draw.text(name_pos, f"Name: {user_data['name']}", fill="black", font=font_large, anchor="lm")
-        draw.text(contact_pos, f"Contact: {user_data['user_contact']}", fill="black", font=font_medium, anchor="lm")
         draw.text(id_pos, f"ID: {user_data['user_id']}", fill="black", font=font_medium, anchor="lm")
-        draw.text(institution_pos, f"Institution: {user_data['institution_name']}", fill="black", font=font_medium, anchor="lm")
+        draw.text(institution_pos, f"Email: {user_data['email']}", fill="black", font=font_medium, anchor="lm")
         
         # Save the card
         os.makedirs("generated_cards", exist_ok=True)
@@ -116,7 +114,6 @@ def main():
     
     user = {
         "name": "John Doe",
-        "user_contact": "1234567890",
         "user_id": "12345",
         "institution_name": "XYZ University"
     }
@@ -128,7 +125,6 @@ def main():
     
     user_data = {
         "name": user["name"],
-        "user_contact": user["user_contact"],
         "profile_image_path": profile_img_path,
         "qr_code_path": qr_code_path,
         "user_id": user["user_id"],

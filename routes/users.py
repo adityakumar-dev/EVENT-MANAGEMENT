@@ -36,16 +36,20 @@ def create_user(
     name: str = Form(...),
     email: str = Form(...),
     image: UploadFile = File(...),
-    institution_name: str = Form(...),
-    contact_number: str = Form(...),
+    id_type: str = Form(...),
+    id: str = Form(...),
+    group_name: str = Form(None),
+    count: str = Form(None),
     db: Session = Depends(get_db)
 ):
     try:
         request_data = {
             "name": name,
             "email": email,
-            "institution_name": institution_name,
-            "contact_number": contact_number,
+            "id_type": id_type,
+            "id": id,
+            "group_name": group_name,
+            "count": count if count else '1',
             "image_filename": image.filename    
         }
         print(f"Creating new user with data: {request_data}")
@@ -66,13 +70,15 @@ def create_user(
         image_path = save_upload_file(image)
         print(f"Saved image at: {image_path}")
 
-        # Create user with direct institution name
+        # Create user
         new_user = models.User(
             name=name,
             email=email,
             image_path=image_path,
-            institution_name=institution_name,
-            contact_number=contact_number
+            id_type=id_type,
+            id=id,
+            group_name=group_name,
+            count=count if count else '1'
         )
         
         db.add(new_user)
@@ -93,9 +99,9 @@ def create_user(
             "name": new_user.name,
             "profile_image_path": str(Path(new_user.image_path)),
             "qr_code_path": new_user.qr_code,
-            "user_contact": new_user.contact_number,
-            "user_id": str(new_user.user_id),
-            "institution_name": new_user.institution_name
+            "user_id": str(new_user.user_id
+                           
+                           ), 'email' : str(new_user.email)
         })
 
         print(f"Successfully created user: {new_user.user_id}")
@@ -115,7 +121,6 @@ def create_user(
             "email": new_user.email,
             "qr_code": new_user.qr_code,
             "image_path": new_user.image_path,
-            "institution_name": new_user.institution_name,
             "visitor_card_path": card_path,
             "card_path": card_path,
             "email_status": "sending_in_background"
@@ -188,7 +193,10 @@ def get_user(
                     "user_id": user.user_id,
                     "name": user.name,
                     "email": user.email,
-                    "institution_name": user.institution_name,
+                    "id_type": user.id_type,
+                    "id" : user.id,
+                    "count" : user.count,
+                    "group_name" : user.group_name,
                     "image_path": f"{user.image_path}",
                     "qr_code_path": f"{user.qr_code}",
                     "created_at": user.created_at.isoformat() if user.created_at else None,
@@ -284,11 +292,14 @@ def get_all_users(
             ).order_by(models.FinalRecords.entry_date.desc()).first()
 
             user_data = {
-                "id": user.user_id,
+                "user_id": user.user_id,
                 "name": user.name,
                 "email": user.email,
                 "image_path": user.image_path,
-                "institution_name": user.institution_name,
+                "group_name": user.group_name,
+                "count" : user.count,
+                "id" : user.id,
+                "id_type" : user.id_type,
                 "created_at": user.created_at.isoformat() if user.created_at else None,
                 "entry_status": {
                     "has_entry_today": bool(today_entry),

@@ -1,20 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func, distinct
+from sqlalchemy import func, distinct, and_
 from dependencies import get_db
 import models
 from datetime import datetime, timedelta
 from typing import Optional
 from collections import defaultdict
+import pytz
 
 router = APIRouter()
 
 def get_current_time():
     """Get current time in IST"""
-    return datetime.now()  # Assuming the server is already set to the correct timezone
+    return datetime.now(pytz.timezone('Asia/Kolkata'))
 
 def validate_date_range(start_date: Optional[datetime], end_date: Optional[datetime]) -> tuple:
-    """Validate and convert date range to UTC"""
+    """Validate and convert date range to IST"""
     if not end_date:
         end_date = get_current_time()
     if not start_date:
@@ -30,7 +31,7 @@ def validate_date_range(start_date: Optional[datetime], end_date: Optional[datet
 def get_analytics(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
-    institution_id: Optional[int] = None,
+    group_name: Optional[str] = None,
     user_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
@@ -42,76 +43,62 @@ def get_analytics(
         base_filters = [
             models.FinalRecords.entry_date.between(start_date.date(), end_date.date())
         ]
-        if institution_id:
-            base_filters.append(models.User.institution_id == institution_id)
+        
+        if group_name:
+            base_filters.append(models.User.group_name == group_name)
         if user_id:
             base_filters.append(models.FinalRecords.user_id == user_id)
 
         # Initialize statistics containers
         stats = {
             'hourly_stats': defaultdict(int),
-            'verification_stats': {
-                'total_attempts': 0,
-                'face_success': 0,
-                'qr_success': 0,
-                'both_success': 0,
-                'failures': 0
+            'entry_stats': {
+                'total_entries': 0,
+                'unique_users': set(),
+                'total_duration_minutes': 0,
+                'completed_visits': 0  # visits with both entry and exit
             },
-            'entry_types': defaultdict(int),
+            'group_stats': defaultdict(lambda: {
+                'total_entries': 0,
+                'unique_users': set(),
+                'total_duration': 0
+            }),
             'daily_stats': defaultdict(lambda: {
                 'entries': 0,
-                'successes': 0,
                 'unique_users': set(),
-            }),
-            'completion_times': [],
-            'duration_stats': [],
+                'total_duration': 0,
+                'groups': defaultdict(set)  # group_name -> set of user_ids
+            })
         }
 
-        # Process records
-        records = db.query(models.FinalRecords).filter(*base_filters).order_by(
-            models.FinalRecords.entry_date.desc()
-        ).all()
+        # Join with User table to get group information
+        records = db.query(models.FinalRecords, models.User).join(
+            models.User,
+            models.FinalRecords.user_id == models.User.user_id
+        ).filter(*base_filters).all()
 
-        for record in records:
+        for record, user in records:
             for log in record.time_logs:
-                # Basic time processing
+                # Process arrival time
                 arrival_time = datetime.fromisoformat(log['arrival'])
-                hour = arrival_time.hour
                 date_str = arrival_time.date().isoformat()
+                hour = arrival_time.hour
 
-                # Track entry type
-                entry_type = log.get('entry_type', 'normal')
-                stats['entry_types'][entry_type] += 1
-
-                # Track hourly distribution
+                # Update basic stats
                 stats['hourly_stats'][hour] += 1
+                stats['entry_stats']['total_entries'] += 1
+                stats['entry_stats']['unique_users'].add(record.user_id)
 
-                # Process verification stats
-                stats['verification_stats']['total_attempts'] += 1
-                is_success = False
+                # Update group stats
+                if user.group_name:
+                    stats['group_stats'][user.group_name]['total_entries'] += 1
+                    stats['group_stats'][user.group_name]['unique_users'].add(record.user_id)
 
-                # Check face verification
-                if log.get('face_verified') is True:
-                    stats['verification_stats']['face_success'] += 1
-
-                # Check QR verification
-                if log.get('qr_verified') is True:
-                    stats['verification_stats']['qr_success'] += 1
-
-                # Determine overall success
-                if log.get('face_verified') is True and log.get('qr_verified') is True:
-                    is_success = True
-                    stats['verification_stats']['both_success'] += 1
-
-                # Update success counters
-                if is_success:
-                    stats['daily_stats'][date_str]['successes'] += 1
-                else:
-                    stats['verification_stats']['failures'] += 1
-
-                # Update daily statistics
+                # Update daily stats
                 stats['daily_stats'][date_str]['entries'] += 1
                 stats['daily_stats'][date_str]['unique_users'].add(record.user_id)
+                if user.group_name:
+                    stats['daily_stats'][date_str]['groups'][user.group_name].add(record.user_id)
 
                 # Calculate duration if available
                 if log.get('arrival') and log.get('departure'):
@@ -119,60 +106,66 @@ def get_analytics(
                     departure = datetime.fromisoformat(log['departure'])
                     duration = (departure - arrival).total_seconds() / 60
                     if duration > 0:
-                        stats['duration_stats'].append(duration)
+                        stats['entry_stats']['total_duration_minutes'] += duration
+                        stats['entry_stats']['completed_visits'] += 1
+                        if user.group_name:
+                            stats['group_stats'][user.group_name]['total_duration'] += duration
+                        stats['daily_stats'][date_str]['total_duration'] += duration
 
-        # Calculate derived metrics
-        total_entries = stats['verification_stats']['total_attempts']
-        total_success = stats['verification_stats']['both_success']
+        # Calculate averages and prepare response
+        total_entries = stats['entry_stats']['total_entries']
+        total_duration = stats['entry_stats']['total_duration_minutes']
+        completed_visits = stats['entry_stats']['completed_visits']
 
         return {
             "time_range": {
                 "start_date": start_date.isoformat(),
                 "end_date": end_date.isoformat(),
-                "timezone": "Asia/Kolkata (UTC+5:30)"  # Assuming this is the server's timezone
+                "timezone": "Asia/Kolkata"
+            },
+            "overall_statistics": {
+                "total_entries": total_entries,
+                "unique_users": len(stats['entry_stats']['unique_users']),
+                "average_duration_minutes": round(total_duration / completed_visits if completed_visits > 0 else 0, 2),
+                "completion_rate": round((completed_visits / total_entries * 100) if total_entries > 0 else 0, 2)
             },
             "traffic_analysis": {
+                "hourly_distribution": dict(stats['hourly_stats']),
                 "peak_hours": [
                     hour for hour, count in stats['hourly_stats'].items()
                     if count >= max(stats['hourly_stats'].values()) * 0.8
                 ],
-                "hourly_distribution": dict(stats['hourly_stats']),
                 "busiest_periods": sorted(
                     [(hour, count) for hour, count in stats['hourly_stats'].items()],
                     key=lambda x: x[1],
                     reverse=True
                 )[:3]
             },
-            "performance_metrics": {
-                "success_rate": round(
-                    (total_success / total_entries * 100) if total_entries > 0 else 0, 2
-                ),
-                "face_verification_rate": round(
-                    (stats['verification_stats']['face_success'] / total_entries * 100) if total_entries > 0 else 0, 2
-                ),
-                "qr_verification_rate": round(
-                    (stats['verification_stats']['qr_success'] / total_entries * 100) if total_entries > 0 else 0, 2
-                ),
+            "group_analysis": {
+                group_name: {
+                    "total_entries": data['total_entries'],
+                    "unique_users": len(data['unique_users']),
+                    "average_duration_minutes": round(
+                        data['total_duration'] / data['total_entries'] if data['total_entries'] > 0 else 0, 2
+                    )
+                }
+                for group_name, data in stats['group_stats'].items()
             },
-            "entry_statistics": {
-                "total_entries": total_entries,
-                "entry_types": dict(stats['entry_types']),
-                "average_duration_minutes": round(
-                    sum(stats['duration_stats']) / len(stats['duration_stats']) if stats['duration_stats'] else 0, 2
-                ),
-                "daily_patterns": {
-                    date: {
-                        "total_entries": data['entries'],
-                        "successful_entries": data['successes'],
-                        "unique_users": len(data['unique_users']),
-                        "success_rate": round(
-                            (data['successes'] / data['entries'] * 100) if data['entries'] > 0 else 0, 2
-                        )
+            "daily_patterns": {
+                date: {
+                    "total_entries": data['entries'],
+                    "unique_users": len(data['unique_users']),
+                    "average_duration_minutes": round(
+                        data['total_duration'] / data['entries'] if data['entries'] > 0 else 0, 2
+                    ),
+                    "group_distribution": {
+                        group: len(users) for group, users in data['groups'].items()
                     }
-                    for date, data in stats['daily_stats'].items()
-                },
+                }
+                for date, data in stats['daily_stats'].items()
             }
         }
 
     except Exception as e:
+        print(f"Analytics error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Analytics error: {str(e)}")
