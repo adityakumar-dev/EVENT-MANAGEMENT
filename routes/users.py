@@ -107,13 +107,13 @@ def create_user(
         print(f"Successfully created user: {new_user.user_id}")
 
         # Send welcome email in background
-        # send_welcome_email_background(
-        #     background_tasks=background_tasks,
-        #     user_email=new_user.email,
-        #     user_name=new_user.name,
-        #     qr_code_path=new_user.qr_code,
-        #     visitor_card_path=card_path
-        # )
+        send_welcome_email_background(
+            background_tasks=background_tasks,
+            user_email=new_user.email,
+            user_name=new_user.name,
+            qr_code_path=new_user.qr_code,
+            visitor_card_path=card_path
+        )
 
         return {
             "user_id": new_user.user_id,
@@ -130,6 +130,104 @@ def create_user(
         db.rollback()
         print(f"Error creating user: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Error creating user: {str(e)}")
+
+@router.get("/all")
+def get_all_users(
+    db: Session = Depends(get_db)
+):
+    try:
+        current_time = datetime.now(pytz.timezone('Asia/Kolkata'))
+        current_date = current_time.date()
+        
+        response = {
+            "all_users": [],
+            "statistics": {
+                "total_users": 0,
+                "total_entries": 0,  # Total entries across all time
+            },
+            "today_statistics": {
+                "total_entries": 0,  # Total entries today
+                "active_entries": 0,  # Users with face image pending
+            }
+        }
+
+        # Get all users
+        users = db.query(models.User).all()
+        response["statistics"]["total_users"] = len(users)
+
+        # Get total entries (all time)
+        total_entries = db.query(models.FinalRecords).count()
+        response["statistics"]["total_entries"] = total_entries
+
+        # Get today's entries
+        today_entries = db.query(models.FinalRecords).filter(
+            func.date(models.FinalRecords.entry_date) == current_date
+        ).count()
+        response["today_statistics"]["total_entries"] = today_entries
+
+        # Get active entries (entries without face image)
+        active_entries = db.query(models.FinalRecords).filter(
+            func.date(models.FinalRecords.entry_date) == current_date,
+            models.FinalRecords.face_image_path == None
+        ).count()
+        response["today_statistics"]["active_entries"] = active_entries
+
+        # Process user data
+        for user in users:
+            # Check if user has entry today
+            today_entry = db.query(models.FinalRecords).filter(
+                models.FinalRecords.user_id == user.user_id,
+                func.date(models.FinalRecords.entry_date) == current_date
+            ).first()
+
+            # Get latest entry for the user
+            latest_entry = db.query(models.FinalRecords).filter(
+                models.FinalRecords.user_id == user.user_id
+            ).order_by(models.FinalRecords.entry_date.desc()).first()
+
+            user_data = {
+                "user_id": user.user_id,
+                "name": user.name,
+                "email": user.email,
+                "image_path": user.image_path,
+                "group_name": user.group_name,
+                "count" : user.count,
+                "id" : user.id,
+                "id_type" : user.id_type,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+                "entry_status": {
+                    "has_entry_today": bool(today_entry),
+                    "face_captured": bool(today_entry and today_entry.face_image_path if today_entry else False),
+                    "latest_entry": {
+                        "entry_date": latest_entry.entry_date.isoformat() if latest_entry else None,
+                        "face_image_path": latest_entry.face_image_path if latest_entry else None,
+                        "record_id": latest_entry.record_id if latest_entry else None
+                    } if latest_entry else None
+                }
+            }
+            response["all_users"].append(user_data)
+
+        # Sort users: those with today's entry but no face image first, 
+        # then those with complete entries today, then the rest
+        response["all_users"].sort(key=lambda x: (
+            not x["entry_status"]["has_entry_today"],  # Today's entries first
+            x["entry_status"]["face_captured"],  # Pending face capture first
+            x["created_at"] if x["created_at"] else "0"  # Then by creation date
+        ))
+
+        return {
+            "status": "success",
+            "message": "Users fetched successfully",
+            "data": response,
+            "timestamp": current_time.isoformat()
+        }
+
+    except Exception as e:
+        print(f"Error fetching users: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching users: {str(e)}"
+        )
 
 @router.get("/{user_id}")
 def get_user(
@@ -236,104 +334,6 @@ def get_user(
     except Exception as e:
         print(f"Error in get_user: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/all")
-def get_all_users(
-    db: Session = Depends(get_db)
-):
-    try:
-        current_time = datetime.now(pytz.timezone('Asia/Kolkata'))
-        current_date = current_time.date()
-        
-        response = {
-            "all_users": [],
-            "statistics": {
-                "total_users": 0,
-                "total_entries": 0,  # Total entries across all time
-            },
-            "today_statistics": {
-                "total_entries": 0,  # Total entries today
-                "active_entries": 0,  # Users with face image pending
-            }
-        }
-
-        # Get all users
-        users = db.query(models.User).all()
-        response["statistics"]["total_users"] = len(users)
-
-        # Get total entries (all time)
-        total_entries = db.query(models.FinalRecords).count()
-        response["statistics"]["total_entries"] = total_entries
-
-        # Get today's entries
-        today_entries = db.query(models.FinalRecords).filter(
-            func.date(models.FinalRecords.entry_date) == current_date
-        ).count()
-        response["today_statistics"]["total_entries"] = today_entries
-
-        # Get active entries (entries without face image)
-        active_entries = db.query(models.FinalRecords).filter(
-            func.date(models.FinalRecords.entry_date) == current_date,
-            models.FinalRecords.face_image_path == None
-        ).count()
-        response["today_statistics"]["active_entries"] = active_entries
-
-        # Process user data
-        for user in users:
-            # Check if user has entry today
-            today_entry = db.query(models.FinalRecords).filter(
-                models.FinalRecords.user_id == user.user_id,
-                func.date(models.FinalRecords.entry_date) == current_date
-            ).first()
-
-            # Get latest entry for the user
-            latest_entry = db.query(models.FinalRecords).filter(
-                models.FinalRecords.user_id == user.user_id
-            ).order_by(models.FinalRecords.entry_date.desc()).first()
-
-            user_data = {
-                "user_id": user.user_id,
-                "name": user.name,
-                "email": user.email,
-                "image_path": user.image_path,
-                "group_name": user.group_name,
-                "count" : user.count,
-                "id" : user.id,
-                "id_type" : user.id_type,
-                "created_at": user.created_at.isoformat() if user.created_at else None,
-                "entry_status": {
-                    "has_entry_today": bool(today_entry),
-                    "face_captured": bool(today_entry and today_entry.face_image_path if today_entry else False),
-                    "latest_entry": {
-                        "entry_date": latest_entry.entry_date.isoformat() if latest_entry else None,
-                        "face_image_path": latest_entry.face_image_path if latest_entry else None,
-                        "record_id": latest_entry.record_id if latest_entry else None
-                    } if latest_entry else None
-                }
-            }
-            response["all_users"].append(user_data)
-
-        # Sort users: those with today's entry but no face image first, 
-        # then those with complete entries today, then the rest
-        response["all_users"].sort(key=lambda x: (
-            not x["entry_status"]["has_entry_today"],  # Today's entries first
-            x["entry_status"]["face_captured"],  # Pending face capture first
-            x["created_at"] if x["created_at"] else "0"  # Then by creation date
-        ))
-
-        return {
-            "status": "success",
-            "message": "Users fetched successfully",
-            "data": response,
-            "timestamp": current_time.isoformat()
-        }
-
-    except Exception as e:
-        print(f"Error fetching users: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error fetching users: {str(e)}"
-        )
 
 # from fastapi import Query
 
