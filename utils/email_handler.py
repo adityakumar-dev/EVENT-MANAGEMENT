@@ -163,17 +163,17 @@ class InvitationEmailHandler:
             msg = MIMEMultipart()
             msg["From"] = from_email
             msg["To"] = to_email
-            msg["Subject"] = "Welcome to Kauthig 2025 - Your Visitor Card is Ready"
+            msg["Subject"] = " Your Visitor Card is Ready"
 
             # HTML Content
             html_content = f"""
             <html>
                 <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                     <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px;">
-                        <h1 style="text-align: center; color: #1a1a1a;">Welcome to Kauthig 2025</h1>
+                        <h1 style="text-align: center; color: #1a1a1a;">Welcome to Rajbhawan</h1>
                         <div style="margin: 20px 0; line-height: 1.6;">
                             <p>Dear {user_name},</p>
-                            <p>Welcome to Kauthig 2025! Your registration has been completed successfully.</p>
+                            <p>Welcome to Rajbhawan! Your registration has been completed successfully.</p>
                             <p>Your visitor card and QR code are attached to this email.</p>
                             <p>Important Information:</p>
                             <ul>
@@ -185,7 +185,7 @@ class InvitationEmailHandler:
                         </div>
                         <div style="text-align: center; color: #6c757d; font-size: 12px; margin-top: 20px; border-top: 1px solid #dee2e6; padding-top: 20px;">
                             <p>This is an automated message. Please do not reply to this email.</p>
-                            <p>Kauthig 2025 Team</p>
+                            <p>Registration Team</p>
                         </div>
                     </div>
                 </body>
